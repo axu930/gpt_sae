@@ -1,13 +1,16 @@
 import os
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"]="1"
+import time 
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
 
+from gpt2_model import * 
 from SAE_model import *
 from data_loader import DataLoader
+
+# ---------
 
 device = "mps:0"
 
@@ -18,14 +21,11 @@ shards = [os.path.join(data_dir,shard) for shard in data_files]
 val_shards = shards[:5]
 train_shards = shards[5:]
 
-# ---------
 # Train run configs
-
-from gpt2_model import * 
 
 model_name = 'gpt2-small'
 run_name = 'trial'
-load_weights = True
+load_weights = False
 
 config = GPT_Config
 h_dim = 8192
@@ -58,7 +58,6 @@ if os.path.exists(weight_file) and load_weights:
 
 # ---------
 
-import time 
 def train():
     optimizer = torch.optim.AdamW(sae_model.parameters(), lr=lr)
     train_loader = DataLoader(B, T, train_shards)
@@ -75,9 +74,9 @@ def train():
             _, _, stream = model(x, get_stream=True)
             sae_data = stream[sae_layer]
             sae_in, sae_out = sae_data[0], sae_data[1]
-            _, _, loss = sae_model(sae_in, targets=sae_out) 
+            out, hidden_activation = sae_model(sae_in) 
+            loss = F.mse_loss(out, sae_out) + F.l1_loss(hidden_activation, torch.zeros_like(hidden_activation))
         loss.backward()
-        optimizer.step()
 
         if step % 100 == 0:
             loss = loss.detach()
@@ -86,7 +85,19 @@ def train():
             tokens_per_sec = B * T * 100 / dt
             t0 = t1
             print(f"step: {step:5d}, train loss: {loss.item():.4f}, dt: {dt*1000:.2f}ms , tok/sec: {tokens_per_sec:.2f}")
-            
+
+        # make sure optimizer trajectories are perpendicular to encoder vectors
+        with torch.no_grad():
+            with torch.autocast(device_type=device, dtype=torch.bfloat16):
+                dot = torch.linalg.vecdot(sae_model.enc.weight,sae_model.enc.weight.grad)
+                sae_model.enc.weight.grad -= dot.unsqueeze(1) * sae_model.enc.weight
+        
+        optimizer.step()
+        
+        #encoder normalization to prevent long term training drift
+        with torch.no_grad():
+            norms = torch.sqrt(torch.linalg.vecdot(sae_model.enc.weight, sae_model.enc.weight))
+            sae_model.enc.weight /= norms.unsqueeze(1)
 
         if step % 1000 == 0 or step == steps - 1:
             sae_model.eval()
@@ -97,7 +108,8 @@ def train():
                     _, _, stream = model(x, get_stream=True)
                     sae_data = stream[sae_layer]
                     sae_in, sae_out = sae_data[0], sae_data[1]
-                    _, _, loss = sae_model(sae_in, targets=sae_out) 
+                    out, hidden_activation = sae_model(sae_in) 
+                    loss = F.mse_loss(out, sae_out) + F.l1_loss(hidden_activation, torch.zeros_like(hidden_activation))
                 loss = loss.detach()
                 print(f"step: {step:5d}, validation loss: {loss.item():.4f}")
             torch.save(sae_model.state_dict(), weight_file)
