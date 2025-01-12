@@ -6,57 +6,50 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from gpt2_model import * 
-from SAE_model import *
+from gpt2_model import GPT
+from SAE_model import SAE
 from data_loader import DataLoader
+
+import loss
+from configs import *
 
 # ---------
 
-device = "mps:0"
-
-data_dir = os.path.join(os.path.dirname(__file__), 'fineweb-edu-10b')
-data_files = os.listdir(data_dir)
-shards = [os.path.join(data_dir,shard) for shard in data_files]
-
-val_shards = shards[:5]
-train_shards = shards[5:]
-
-# Train run configs
-
-model_name = 'gpt2-small'
+# What are we testing
 run_name = 'trial'
+model_name = 'gpt2-small'
+
+# Model configs
+gpt_config = GPT_Config
+sae_config = SAE_Config
 load_weights = False
+sae_layer = gpt_config.n_layer // 2 # MLP layer number that we are trying to approximate
+loss_function = loss.autoencoder_L1_loss
 
-config = GPT_Config
-h_dim = 8192
-sae_layer = config.n_layer // 2 #Layer number of MLP we are trying to approximate
-
-
+# Training configs
 B = 8 #Batch size
 T = 1024 #Sequence length
 lr = 1e-4 #Learning rate
 steps = 2000
 
-# Model inits
-
+# Model init
 model = GPT.from_pretrained('gpt2')
 model.to(device)
 for param in model.parameters():
     param.requires_grad = False
 model.eval()
 
-sae_model = SAE(config, hidden_dim=h_dim)
+sae_model = SAE(gpt_config, sae_config)
 sae_model.to(device)
 
 # Load in weights 
-
-weights_dir = os.path.join(os.path.dirname(__file__), 'weights')
-os.makedirs(weights_dir, exist_ok=True)
 weight_file = os.path.join(weights_dir, f"{model_name}_{run_name}_layer{sae_layer}.ckpt")
 if os.path.exists(weight_file) and load_weights:
+    print('Loading in pretrained SAE weights')
     sae_model.load_state_dict(torch.load(weight_file, map_location=device, weights_only=True))
 
 # ---------
+
 
 def train():
     optimizer = torch.optim.AdamW(sae_model.parameters(), lr=lr)
@@ -75,7 +68,9 @@ def train():
             sae_data = stream[sae_layer]
             sae_in, sae_out = sae_data[0], sae_data[1]
             out, hidden_activation = sae_model(sae_in) 
-            loss = F.mse_loss(out, sae_out) + F.l1_loss(hidden_activation, torch.zeros_like(hidden_activation))
+            loss = loss_function(out.flatten(start_dim=0,end_dim=1), 
+                                 sae_out.flatten(start_dim=0,end_dim=1), 
+                                 hidden_activation.flatten(start_dim=0,end_dim=1),)
         loss.backward()
 
         if step % 100 == 0:
@@ -84,7 +79,7 @@ def train():
             dt = t1 - t0 # time difference in seconds
             tokens_per_sec = B * T * 100 / dt
             t0 = t1
-            print(f"step: {step:5d}, train loss: {loss.item():.4f}, dt: {dt*1000:.2f}ms , tok/sec: {tokens_per_sec:.2f}")
+            print(f"step: {step:5d}, train loss: {loss.item():.4f}, dt: {dt:.2f}s , tok/sec: {tokens_per_sec:.2f}")
 
         # make sure optimizer trajectories are perpendicular to encoder vectors
         with torch.no_grad():
@@ -109,7 +104,9 @@ def train():
                     sae_data = stream[sae_layer]
                     sae_in, sae_out = sae_data[0], sae_data[1]
                     out, hidden_activation = sae_model(sae_in) 
-                    loss = F.mse_loss(out, sae_out) + F.l1_loss(hidden_activation, torch.zeros_like(hidden_activation))
+                    loss = loss_function(out.flatten(start_dim=0,end_dim=1), 
+                                 sae_out.flatten(start_dim=0,end_dim=1), 
+                                 hidden_activation.flatten(start_dim=0,end_dim=1),)
                 loss = loss.detach()
                 print(f"step: {step:5d}, validation loss: {loss.item():.4f}")
             torch.save(sae_model.state_dict(), weight_file)
