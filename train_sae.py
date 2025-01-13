@@ -10,27 +10,27 @@ from gpt2_model import GPT
 from SAE_model import SAE
 from data_loader import DataLoader
 
-import loss
+import loss as L
 from configs import *
 
 # ---------
 
 # What are we testing
-run_name = 'trial'
+run_name = 'JL_trial' ##
 model_name = 'gpt2-small'
 
 # Model configs
 gpt_config = GPT_Config
-sae_config = SAE_Config
-load_weights = False
+sae_config = JL_SAE_Config
 sae_layer = gpt_config.n_layer // 2 # MLP layer number that we are trying to approximate
-loss_function = loss.autoencoder_L1_loss
+
+load_weights = False
 
 # Training configs
 B = 8 #Batch size
 T = 1024 #Sequence length
 lr = 1e-4 #Learning rate
-steps = 2000
+steps = 5000
 
 # Model init
 model = GPT.from_pretrained('gpt2')
@@ -64,13 +64,20 @@ def train():
         x = train_loader.next_batch()
         x = x.to(device)
         with torch.autocast(device_type=device, dtype=torch.bfloat16):
-            _, _, stream = model(x, get_stream=True)
+            with torch.no_grad():
+                _, _, stream = model(x, get_stream=True)
             sae_data = stream[sae_layer]
-            sae_in, sae_out = sae_data[0], sae_data[1]
+            sae_in, sae_out = sae_data[0].flatten(start_dim=0,end_dim=1), sae_data[1].flatten(start_dim=0,end_dim=1)
             out, hidden_activation = sae_model(sae_in) 
-            loss = loss_function(out.flatten(start_dim=0,end_dim=1), 
-                                 sae_out.flatten(start_dim=0,end_dim=1), 
-                                 hidden_activation.flatten(start_dim=0,end_dim=1),)
+
+            if sae_config.loss_fn == 'l1':
+                loss = L.autoencoder_L1_loss(out - sae_out, 
+                                    hidden_activation,
+                                    sae_in,)
+            else:
+                loss = L.autoencoder_JL_loss(out - sae_out, 
+                                    sae_model.enc.weight)
+
         loss.backward()
 
         if step % 100 == 0:
@@ -79,7 +86,7 @@ def train():
             dt = t1 - t0 # time difference in seconds
             tokens_per_sec = B * T * 100 / dt
             t0 = t1
-            print(f"step: {step:5d}, train loss: {loss.item():.4f}, dt: {dt:.2f}s , tok/sec: {tokens_per_sec:.2f}")
+            print(f"step: {step:5d}, train loss: {loss.item():.4f}, mse loss: {((out - sae_out) ** 2).mean()}, dt: {dt:.2f}s , tok/sec: {tokens_per_sec:.2f}")
 
         # make sure optimizer trajectories are perpendicular to encoder vectors
         with torch.no_grad():
@@ -102,14 +109,19 @@ def train():
                 with torch.autocast(device_type=device, dtype=torch.bfloat16):
                     _, _, stream = model(x, get_stream=True)
                     sae_data = stream[sae_layer]
-                    sae_in, sae_out = sae_data[0], sae_data[1]
+                    sae_in, sae_out = sae_data[0].flatten(start_dim=0,end_dim=1), sae_data[1].flatten(start_dim=0,end_dim=1)
                     out, hidden_activation = sae_model(sae_in) 
-                    loss = loss_function(out.flatten(start_dim=0,end_dim=1), 
-                                 sae_out.flatten(start_dim=0,end_dim=1), 
-                                 hidden_activation.flatten(start_dim=0,end_dim=1),)
+                    if sae_config.loss_fn == 'l1':
+                        loss = L.autoencoder_L1_loss(out - sae_out, 
+                                            hidden_activation,
+                                            sae_in,)
+                    else:
+                        loss = L.autoencoder_JL_loss(out - sae_out, 
+                                            sae_model.enc.weight)
                 loss = loss.detach()
-                print(f"step: {step:5d}, validation loss: {loss.item():.4f}")
+                print(f"step: {step:5d}, validation loss: {loss.item():.4f}, mse loss: {((out - sae_out) ** 2).mean()}")
             torch.save(sae_model.state_dict(), weight_file)
+            print(f"Model weights saved to {weight_file}")
             
     print("Finished training!")
 

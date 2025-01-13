@@ -1,7 +1,8 @@
 import torch
 import torch.nn.functional as F
+import math
 
-from configs import device, SAE_Config, sparsity_lambda
+from configs import device, SAE_Config, L1_lambda, JL_lambda
 
 """
 Loss functions expect 2d tensors in the following shapes:
@@ -12,23 +13,36 @@ Loss functions expect 2d tensors in the following shapes:
 Flatten tensors from [B,T,C] into [B*T, C] before passing to loss function
 """
 
-def autoencoder_L1_loss(out, targets, activations): 
+def autoencoder_L1_loss(reconstruction_errors: torch.Tensor, 
+                        activations: torch.Tensor, 
+                        sae_inputs: torch.Tensor,
+                        coeff = L1_lambda): 
     return (
-        F.mse_loss(out, targets) 
-        + sparsity_lambda * normalized_L1_loss(activations)
+        (reconstruction_errors ** 2).mean()
+        + coeff * normalized_L1_loss(sae_inputs, activations)
     )
 
-def autoencoder_JL_loss(out, targets, w_enc):
+def autoencoder_JL_loss(reconstruction_errors: torch.Tensor, 
+                        w_enc: torch.Tensor,
+                        coeff = JL_lambda):
     return (
-        F.mse_loss(out, targets) 
-        + sparsity_lambda * normalized_JL_loss(w_enc)
+        (reconstruction_errors ** 2).mean()
+        + coeff * JL_loss(w_enc, input_dim=reconstruction_errors.shape[1])
     )
 
+def normalized_mse_loss(reconstructon_errors: torch.Tensor,
+                        sae_inputs: torch.Tensor, ):
+    return (
+        (reconstructon_errors ** 2).mean(dim=1) / (sae_inputs ** 2).mean(dim=1)
+            ).mean()
 
-def normalized_L1_loss(activations):
-    return activations.sum(dim=1).mean()
+def normalized_L1_loss(sae_inputs: torch.Tensor, 
+                       activations: torch.Tensor,):
+    return (
+        activations.sum(dim=1) / sae_inputs.norm(dim=1)
+        ).mean()
 
-def normalized_JL_loss(w_enc):
+def JL_loss(w_enc: torch.Tensor, input_dim=1):
     mask = (torch.arange(SAE_Config.h_dim)[:,None] != torch.arange(SAE_Config.h_dim)[None,:]).to(device)
     dot_matrix = F.relu((w_enc @ w_enc.T) * mask)
-    return F.l1_loss(dot_matrix, torch.zeros_like(dot_matrix)) * SAE_Config.h_dim
+    return dot_matrix.mean() * math.sqrt(input_dim) # dimension specific normalization term

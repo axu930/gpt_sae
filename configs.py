@@ -14,7 +14,8 @@ val_shards = shards[:5]
 train_shards = shards[5:]
 
 # In the loss function, the ratio of reconstruction loss : sparsity loss
-sparsity_lambda = 1
+L1_lambda = 0.01
+JL_lambda = 1
 
 # ----------
 
@@ -36,3 +37,10 @@ class GPT_medium_Config:
 
 class SAE_Config:
     h_dim: int = 8192 
+    bias: bool = True
+    loss_fn: str = 'l1'
+
+class JL_SAE_Config:
+    h_dim: int = 8192 
+    bias: bool = False
+    loss_fn: str = 'jl'

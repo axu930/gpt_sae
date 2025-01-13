@@ -2,31 +2,10 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-import tiktoken
-import numpy as np
-
-import math
-import os
-
+from configs import GPT_Config, GPT_medium_Config
 
 # ----------
-# Implement GPT2 modules 
-
-class GPT_Config:
-    block_size: int = 1024 # max sequence length
-    vocab_size: int = 50257 # number of tokens: 50,000 BPE merges + 256 bytes tokens + 1 <|endoftext|> token
-    n_layer: int = 12 # number of layers
-    n_head: int = 12 # number of heads
-    n_embd: int = 768 # embedding dimension
-
-
-class GPT_medium_Config:
-    block_size: int = 1024 # max sequence length
-    vocab_size: int = 50257 # number of tokens: 50,000 BPE merges + 256 bytes tokens + 1 <|endoftext|> token
-    n_layer: int = 24 # number of layers
-    n_head: int = 16 # number of heads
-    n_embd: int = 1024 # embedding dimension
-
+# GPT2 modules 
 
 class CausalSelfAttention(nn.Module):
 
@@ -191,9 +170,9 @@ class GPT(nn.Module):
 # ----------
 # dataloader + methods for loading tokens and text generation
 
-enc = tiktoken.get_encoding('gpt2')
-
 def generate_text(model, in_tokens: torch.tensor, num_tokens = 30, num_samples = 5):
+    import tiktoken
+    enc = tiktoken.get_encoding('gpt2')
     with torch.no_grad():
         tokens = in_tokens.unsqueeze(0).repeat(num_samples,1)
         for _ in range(num_tokens):

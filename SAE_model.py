@@ -14,8 +14,9 @@ class SAE(nn.Module):
         if layer_num:
             self.layer_num = layer_num
 
-        self.enc = nn.Linear(config.n_embd, sae_config.h_dim, bias = True)
-        self.dec = nn.Linear(sae_config.h_dim, config.n_embd, bias = True)
+        self.bias = sae_config.bias
+        self.enc = nn.Linear(config.n_embd, sae_config.h_dim, bias = sae_config.bias)
+        self.dec = nn.Linear(sae_config.h_dim, config.n_embd, bias = sae_config.bias)
 
         nn.init.kaiming_uniform_(self.enc.weight, a=0, mode='fan_in', nonlinearity='relu')
         norms = torch.sqrt(torch.linalg.vecdot(self.enc.weight,self.enc.weight))
@@ -24,11 +25,13 @@ class SAE(nn.Module):
 
 
     def forward(self, x):
-        hidden_activation = F.relu(self.enc(x - self.dec.bias))
+        if self.bias:
+            hidden_activation = F.relu(self.enc(x - self.dec.bias))
+        else:
+            hidden_activation = F.relu(self.enc(x))
         out = self.dec(hidden_activation)
         return out, hidden_activation
     
     def resample(self):
         return NotImplementedError
-
 
