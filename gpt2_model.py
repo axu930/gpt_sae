@@ -5,7 +5,6 @@ from torch.nn import functional as F
 from configs import GPT_Config, GPT_medium_Config
 
 # ----------
-# GPT2 modules 
 
 class CausalSelfAttention(nn.Module):
 

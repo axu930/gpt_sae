@@ -13,13 +13,11 @@ shards = [os.path.join(data_dir,shard) for shard in data_files]
 val_shards = shards[:5]
 train_shards = shards[5:]
 
-# In the loss function, the ratio of reconstruction loss : sparsity loss
-L1_lambda = 0.01
-JL_lambda = 1
 
 # ----------
 
 class GPT_Config:
+    model_name: str = 'gpt2-small'
     block_size: int = 1024 # max sequence length
     vocab_size: int = 50257 # number of tokens: 50,000 BPE merges + 256 bytes tokens + 1 <|endoftext|> token
     n_layer: int = 12 # number of layers
@@ -28,6 +26,7 @@ class GPT_Config:
 
 
 class GPT_medium_Config:
+    model_name: str = 'gpt2-medium'
     block_size: int = 1024 # max sequence length
     vocab_size: int = 50257 # number of tokens: 50,000 BPE merges + 256 bytes tokens + 1 <|endoftext|> token
     n_layer: int = 24 # number of layers
@@ -36,11 +35,28 @@ class GPT_medium_Config:
 
 
 class SAE_Config:
+    model_name: str = 'l1-sae'
     h_dim: int = 8192 
     bias: bool = True
     loss_fn: str = 'l1'
+    
 
 class JL_SAE_Config:
+    model_name: str = 'jl-sae'
     h_dim: int = 8192 
     bias: bool = False
     loss_fn: str = 'jl'
+
+
+class hybrid_SAE_Config:
+    model_name: str = 'hybrid-sae'
+    h_dim: int = 8192 
+    bias: bool = False
+    loss_fn: str = 'hybrid'
+
+
+class hybrid_SAE_Config2:
+    model_name: str = 'hybrid-sae'
+    h_dim: int = 8192 
+    bias: bool = True
+    loss_fn: str = 'hybrid'

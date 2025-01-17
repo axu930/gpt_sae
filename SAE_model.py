@@ -2,8 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
-
 # ---------
 
 class SAE(nn.Module):
@@ -22,6 +20,7 @@ class SAE(nn.Module):
         norms = torch.sqrt(torch.linalg.vecdot(self.enc.weight,self.enc.weight))
         with torch.no_grad():
             self.enc.weight /= norms.unsqueeze(1)
+            self.dec.weight = nn.Parameter(self.enc.weight.T.clone().detach())
 
 
     def forward(self, x):
@@ -32,6 +31,4 @@ class SAE(nn.Module):
         out = self.dec(hidden_activation)
         return out, hidden_activation
     
-    def resample(self):
-        return NotImplementedError
 
